@@ -58,6 +58,7 @@ fn main() {
                 let _ = writeln!(file, "{}", path.to_string_lossy());
                 open_in_nvim(path.to_str().unwrap().to_string());
             }
+            open_in_nvim(args.file);
             std::process::exit(1);
         }
     };
