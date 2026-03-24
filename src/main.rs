@@ -1,9 +1,12 @@
-use std::fs::{File, OpenOptions, canonicalize};
-use std::io::{Read, Write};
+use std::env::args;
+use std::fs::canonicalize;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+use anyhow::Result;
 use clap::Parser;
+use hopr::db::Database;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -23,6 +26,10 @@ fn open_in_nvim(selected: String) {
     }
 }
 
+fn open_in_nvim_unix(selected: String) {
+    let _ = Command::new("nvim").arg(selected).exec();
+}
+
 fn fuzzy_select(content: String, search: &str) -> Option<String> {
     for line in content.split("\n") {
         if line.contains(search) {
@@ -32,36 +39,29 @@ fn fuzzy_select(content: String, search: &str) -> Option<String> {
     None
 }
 
-fn main() {
-    let HISTORY = format!("{}/.hopr_history", std::env::var("HOME").unwrap());
-
+fn main() -> Result<()> {
     let args = Cli::parse();
-    let mut file = match File::open(&HISTORY) {
-        Ok(file) => file,
-        Err(_) => File::create(&HISTORY).unwrap(),
+    let HISTORY = format!("{}/.hopr_history", std::env::var("HOME").unwrap());
+    let mut database = Database::new(HISTORY.into());
+    let mut database = match database.load() {
+        Ok(v) => v,
+        Err(e) => database,
     };
 
-    let mut buffer = vec![];
-    let _ = file.read_to_end(&mut buffer);
-    let content = String::from_utf8_lossy(&buffer);
+    if args.file == "list" {
+        println!("{}", database);
+        return Ok(());
+    }
 
-    let selected = match fuzzy_select(content.to_string(), &args.file) {
-        Some(v) => v,
-        None => {
-            let mut file = OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(HISTORY)
-                .expect("Failed to open File");
-            let path = PathBuf::from(&args.file);
-            if let Ok(path) = canonicalize(&path) {
-                let _ = writeln!(file, "{}", path.to_string_lossy());
-                open_in_nvim(path.to_str().unwrap().to_string());
-            }
-            open_in_nvim(args.file);
-            std::process::exit(1);
-        }
+    println!("{:?}", database);
+    let selected = database.query(&args.file);
+    println!("{:?}", selected);
+
+    let to_open = match selected {
+        Ok(v) => v.path.to_string_lossy(),
+        Err(_) => args.file.into(),
     };
 
-    open_in_nvim(selected);
+    open_in_nvim_unix(to_open.to_string());
+    Ok(())
 }
